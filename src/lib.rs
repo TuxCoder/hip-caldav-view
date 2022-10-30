@@ -1,16 +1,11 @@
-use chrono::{prelude::*, LocalResult};
+use chrono::{DateTime, LocalResult, Local, TimeZone};
 use chrono_tz::Tz;
 use gloo_net::http::Request;
-use std::{default, time::SystemTime};
+use wasm_bindgen::JsValue;
 use yew::{prelude::*, virtual_dom::VNode};
-//use serde::Deserialize;
-/*use yew::{
-    format::{Json, Nothing},
-    prelude::*,
-    services::fetch::{FetchService, FetchTask, Request, Response},
-};*/
+use js_sys::{Intl, Array, Object, Reflect};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CalendarEvent {
     pub name: String,
     pub desciption: String,
@@ -140,6 +135,19 @@ fn parse_calendar(response: String) -> CalendarData {
 }
 
 
+fn get_client_timezone() -> Tz {
+    let options = Intl::DateTimeFormat::new(&Array::new(), &Object::new())
+    .resolved_options();
+
+    let tz = Reflect::get(&options, &JsValue::from("timeZone"))
+        .expect("Cannot get timeZone")
+        .as_string()
+        .expect("timeZone is not a String");
+
+    tz.parse().unwrap()
+
+}
+
 impl Component for CaldavViewer {
     type Message = Msg;
     type Properties = ();
@@ -178,6 +186,8 @@ impl Component for CaldavViewer {
         let now = Local::now();
         let load_from = now - chrono::Duration::days(7);
         let soon = now + chrono::Duration::days(2);
+        let local_timezone = get_client_timezone();
+
         let eventlist: Option<VNode> = self.calendar.as_ref().map(|calendar_event| {
             calendar_event.events.iter().filter(|event| event.start > load_from).map(|event| {
                 let status_class = if event.start < now { "old" } else if event.start < soon { "soon" } else {""};
@@ -186,7 +196,7 @@ impl Component for CaldavViewer {
                     <div class={status_class} >
                     <h2> {event.name.clone() } </h2>
                     <p>
-                        { format!("StartTime:{:}",  event.start) }
+                        { format!("StartTime:{}",  event.start.with_timezone(&local_timezone)) }
                     </p>
                     </div>
                 }
