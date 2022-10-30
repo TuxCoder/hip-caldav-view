@@ -135,6 +135,7 @@ fn parse_calendar(response: String) -> CalendarData {
             }
         }
     }
+    data.events.sort_by(|a, b| a.start.cmp(&b.start) );
     data
 }
 
@@ -174,10 +175,12 @@ impl Component for CaldavViewer {
     }
 
     fn view(&self, _: &Context<Self>) -> Html {
+        let now = Local::now();
+        let from = now - chrono::Duration::days(7);
         let eventlist: Option<VNode> = self.calendar.as_ref().map(|calendar_event| {
-            calendar_event.events.iter().map(|event| 
+            calendar_event.events.iter().filter(|event| event.start > from).map(|event| 
                 html! {
-                    <div >
+                    <div class={if event.start < now { "old" } else { ""}} >
                     <h2> {event.name.clone() } </h2>
                     <p>
                         { format!("StartTime:{:}",  event.start) }
