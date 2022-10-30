@@ -176,18 +176,21 @@ impl Component for CaldavViewer {
 
     fn view(&self, _: &Context<Self>) -> Html {
         let now = Local::now();
-        let from = now - chrono::Duration::days(7);
+        let load_from = now - chrono::Duration::days(7);
+        let soon = now + chrono::Duration::days(2);
         let eventlist: Option<VNode> = self.calendar.as_ref().map(|calendar_event| {
-            calendar_event.events.iter().filter(|event| event.start > from).map(|event| 
+            calendar_event.events.iter().filter(|event| event.start > load_from).map(|event| {
+                let status_class = if event.start < now { "old" } else if event.start < soon { "soon" } else {""};
+
                 html! {
-                    <div class={if event.start < now { "old" } else { ""}} >
+                    <div class={status_class} >
                     <h2> {event.name.clone() } </h2>
                     <p>
                         { format!("StartTime:{:}",  event.start) }
                     </p>
                     </div>
                 }
-            ).collect()
+            }).collect()
         });
 
         html! {
