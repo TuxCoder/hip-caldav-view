@@ -259,7 +259,7 @@ impl Component for CaldavViewer {
 
     fn view(&self, _: &Context<Self>) -> Html {
         let now = Local::now();
-        let load_from = now - chrono::Duration::days(7);
+        let load_from = now - chrono::Duration::days(3);
         let soon = now + chrono::Duration::days(2);
         let local_timezone = get_client_timezone();
 
@@ -273,7 +273,11 @@ impl Component for CaldavViewer {
                         <div class={status_class} >
                         <h2> {event.name.clone() } </h2>
                         <p>
-                            { format!("StartTime:{}",  event.start.with_timezone(&local_timezone)) }
+                            { format!("StartTime:{}",  event.start.with_timezone(&local_timezone)) } <br />
+                            { "Description:" } <br />
+                            <p>
+                                { for event.desciption.split("\\n").map(|line| html!{<> {line} <br /> </> }) }
+                            </p>
                         </p>
                         </div>
                     }
