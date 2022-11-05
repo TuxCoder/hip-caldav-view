@@ -223,6 +223,8 @@ fn get_client_timezone() -> Tz {
 
 }
 
+static CALENDAR_URL: &str = "/hip.calendar/1e9b83e9-ad64-c8ec-89b9-6c79fcbe2742/";
+
 impl Component for CaldavViewer {
     type Message = Msg;
     type Properties = ();
@@ -230,7 +232,7 @@ impl Component for CaldavViewer {
     fn create(ctx: &Context<Self>) -> Self {
         ctx.link().send_future(async {
             let response: String =
-                Request::get("/hip.calendar/1e9b83e9-ad64-c8ec-89b9-6c79fcbe2742/")
+                Request::get(CALENDAR_URL)
                     .send()
                     .await
                     .unwrap()
@@ -287,6 +289,7 @@ impl Component for CaldavViewer {
         html! {
         <div>
             <h1>{ "Hip Public events" }</h1>
+            <p>{ "CalDav URL:" }<a href={ CALENDAR_URL } >{ CALENDAR_URL }</a></p>
             { for eventlist }
         </div>
         }
