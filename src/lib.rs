@@ -1,218 +1,17 @@
-use std::collections::HashMap;
-
-use chrono::{DateTime, LocalResult, Local, TimeZone, Utc};
+use chrono::Local;
 use chrono_tz::Tz;
+use gloo_net;
 use gloo_net::http::Request;
+use js_sys::{Array, Intl, Object, Reflect};
 use wasm_bindgen::JsValue;
 use yew::{prelude::*, virtual_dom::VNode};
-use js_sys::{Intl, Array, Object, Reflect};
+use yew_hooks::{use_async, use_mount};
+use thiserror;
 
-#[derive(Debug)]
-pub struct CalendarEvent {
-    pub name: String,
-    pub desciption: String,
-    pub start: DateTime<Local>,
-    pub end: DateTime<Local>,
-}
+mod parser;
 
-#[derive(Debug, Default)]
-pub struct CalendarData {
-    pub events: Vec<CalendarEvent>,
-}
-
-#[derive(Debug, Default)]
-pub struct CaldavViewer {
-    calendar: Option<CalendarData>,
-}
-
-pub enum Msg {
-    Loaded,
-    SetCalendarData(CalendarData),
-}
-
-fn parse_calendar(response: String) -> CalendarData {
-
-    //let calendar = Calendar::new_from_data(response);
-
-    let reader = ical::IcalParser::new(response.as_bytes());
-    let mut data = CalendarData::default();
-
-    for line in reader {
-        match line {
-            Ok(ical_data) => {
-                //log::info!("data: {:?}", data.events);
-                for event in ical_data.events {
-                    let mut start: Option<DateTime<Local>> = None;
-                    let mut start_tz: Option<Tz> = None;
-                    let mut end: Option<DateTime<Local>> = None;
-                    let mut name = None;
-                    let mut desciption = None;
-                    let mut rrule: HashMap<String, String> = HashMap::new();
-                    for prop in event.properties {
-                        if prop.name == "SUMMARY" {
-                            name = Some(prop.value.unwrap_or_default());
-                        } else if prop.name == "DESCRIPTION" {
-                            desciption = Some(prop.value.unwrap_or_default());
-                        } else if prop.name == "DTSTART" {
-                            let time = prop.value.unwrap_or_default();
-
-                            let mut tz = chrono_tz::Europe::Berlin; // default timezone
-                            for (param_name, param_values) in prop.params.unwrap() {
-
-                                if param_name == "TZID" {
-                                    match param_values[0].parse() {
-                                        Ok(timezone) => {
-                                            tz = timezone;
-                                        }
-                                        Err(_) => {
-                                            log::error!("tzid parse error");
-                                        }
-                                    }
-                                }
-                            }
-
-                            match chrono::NaiveDateTime::parse_from_str(
-                                time.as_ref(),
-                                "%Y%m%dT%H%M%S",
-                            ) {
-                                Ok(time) => {
-                                    match tz.from_local_datetime(&time) {
-                                        LocalResult::Single(time) => {
-                                            start = Some(time.with_timezone(&Local));
-                                            start_tz = Some(tz);
-                                        }
-                                        _ => {
-                                            log::error!("time convert errror");
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("{:?}", e)
-                                }
-                            }
-                        } else if prop.name == "DTEND" {
-                            let time = prop.value.unwrap_or_default();
-
-                            let mut tz = chrono_tz::Europe::Berlin; // default timezone
-                            for (param_name, param_values) in prop.params.unwrap() {
-
-                                if param_name == "TZID" {
-                                    match param_values[0].parse() {
-                                        Ok(timezone) => {
-                                            tz = timezone
-                                        }
-                                        Err(_) => {
-                                            log::error!("tzid parse error")
-                                        }
-                                    }
-                                }
-                            }
-
-                            match chrono::NaiveDateTime::parse_from_str(
-                                time.as_ref(),
-                                "%Y%m%dT%H%M%S",
-                            ) {
-                                Ok(time) => {
-                                    match tz.from_local_datetime(&time) {
-                                        LocalResult::Single(time) => {
-                                            end = Some(
-                                                time.with_timezone(&Local), //DateTime<Local>::default()
-                                            )
-                                        }
-                                        _ => {
-                                            log::error!("time convert errror");
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    log::error!("{:?}", e)
-                                }
-                            }
-                        } else if prop.name == "RRULE" {
-                            for param in prop.value.unwrap().split(";") {
-                                let mut split = param.split("=");
-                                let (key, value)  = match (split.next(), split.next())  {
-                                    (Some(key), Some(value)) => (key, value),
-                                    _ => {
-                                        break;
-                                    }
-                                };
-                                rrule.insert(key.to_string(), value.to_string());
-                            }
-                        }
-                    }
-                    if name.is_some() && start.is_some() && end.is_some() {
-                        let name = name.unwrap();
-                        let start = start.unwrap();
-                        let end = end.unwrap();
-                        let desciption = desciption.unwrap_or_else(|| "".to_string());
-                        //add successfully parsed data
-                        let event = CalendarEvent {
-                            name: name.clone(),
-                            start: start,
-                            end: end,
-                            desciption: desciption.clone(),
-                        };
-                        data.events.push(event);
-
-                        if rrule.contains_key("FREQ") && rrule.contains_key("UNTIL") {
-                            let freq = rrule.get("FREQ").unwrap().as_str();
-                            let duration = end - start;
-                            match chrono::NaiveDateTime::parse_from_str(
-                                rrule.get("UNTIL").unwrap(),
-                                "%Y%m%dT%H%M%SZ",
-                            ) {
-                                Ok(until_raw) => {
-                                    let until = Utc.from_utc_datetime(&until_raw);
-
-
-                                    let periode = match freq {
-                                        "WEEKLY" => {
-                                            chrono::Duration::weeks(1)
-                                        },
-                                        _ => {
-                                            log::error!("not implemented freq\n");
-                                            chrono::Duration::weeks(100)
-                                        }
-                                    };
-                                    let mut time_event_tz = start.with_timezone(&start_tz.unwrap());
-                                    
-                                    time_event_tz += periode;
-                                    while time_event_tz < until {
-
-                                        let event = CalendarEvent {
-                                            name: name.clone(),
-                                            start: time_event_tz.with_timezone(&Local),
-                                            end: (time_event_tz + duration).with_timezone(&Local),
-                                            desciption: desciption.clone(),
-                                        };
-                                        data.events.push(event);
-
-                                        time_event_tz += periode;
-                                    }
-
-                                },
-                                Err(_) => {
-                                    log::error!("could not parse UNTIL date in rrule");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            Err(_) => {
-                log::error!("in parsing");
-            }
-        }
-    }
-    data.events.sort_by(|a, b| a.start.cmp(&b.start) );
-    data
-}
-
-
-fn get_client_timezone() -> Tz {
-    let options = Intl::DateTimeFormat::new(&Array::new(), &Object::new())
-    .resolved_options();
+pub fn get_client_timezone() -> Tz {
+    let options = Intl::DateTimeFormat::new(&Array::new(), &Object::new()).resolved_options();
 
     let tz = Reflect::get(&options, &JsValue::from("timeZone"))
         .expect("Cannot get timeZone")
@@ -220,11 +19,105 @@ fn get_client_timezone() -> Tz {
         .expect("timeZone is not a String");
 
     tz.parse().unwrap()
-
 }
 
-static CALENDAR_URL: &str = "/hip.calendar/1e9b83e9-ad64-c8ec-89b9-6c79fcbe2742/";
+#[derive(Properties, Clone, PartialEq)]
+pub struct Props {
+    pub url: String,
+}
 
+#[derive(Debug, thiserror::Error, Clone)]
+enum Error {
+    #[error("connection error")]
+    Connection(),
+    #[error("parsing error")]
+    Parser(),
+}
+
+async fn load_data(url: &str) -> Result<String, Error> {
+    let response: String = Request::get(url)
+        .send()
+        .await
+        .or_else(|_| Err(Error::Connection()))?
+        .text()
+        .await
+        .or_else(|_| Err(Error::Connection()))?;
+
+    Ok(response)
+}
+
+#[function_component(CaldavViewer)]
+pub fn caldav_viewer(props: &Props) -> Html {
+    let calendar_data_result_async = {
+        let props = props.clone();
+        use_async(async move { load_data(&props.url).await })
+    };
+
+    {
+        let calendar_data_result_async = calendar_data_result_async.clone();
+        use_mount(move || {
+            calendar_data_result_async.run();
+            ()
+        });
+    }
+
+
+    if let Some(calendar_data_result) = &calendar_data_result_async.data {
+        let now = Local::now();
+        let load_from = now - chrono::Duration::days(3);
+        let soon = now + chrono::Duration::days(2);
+        let local_timezone = get_client_timezone();
+
+        let calendar_data = parser::parse_calendar(calendar_data_result).unwrap();
+        let events = calendar_data.events;
+
+        let eventlist: VNode =
+            events.iter()
+                .filter(|event| event.start > load_from)
+                .map(|event| {
+                    let status_class = if event.start < now { "old" } else if event.start < soon { "soon" } else {""};
+
+                    html! {
+                        <div class={status_class} >
+                        <h2> {event.name.clone() } </h2>
+                        <p>
+                            { format!("StartTime:{}",  event.start.with_timezone(&local_timezone)) } <br />
+                            { "Description:" } <br />
+                            <p>
+                                { for event.desciption.split("\\n").map(|line| html!{<> {line} <br /> </> }) }
+                            </p>
+                        </p>
+                        </div>
+                    }
+                }).collect();
+
+        return html! {
+            <div>
+                <h1>{ "Hip Public events" }</h1>
+                <p>{ "CalDav URL:" }<a href={ props.url.clone() } >{ props.url.clone() }</a></p>
+                { eventlist }
+            </div>
+        }
+    }
+
+    match &calendar_data_result_async.error {
+        Some(_) => {
+            return html! {
+                <div>
+                    {"Error!"}
+                </div>
+            };
+        },
+        None => {
+            return html!{
+                <div>
+                    {"loading"}
+                </div>
+            }
+        }
+    }
+}
+/*
 impl Component for CaldavViewer {
     type Message = Msg;
     type Properties = ();
@@ -295,3 +188,4 @@ impl Component for CaldavViewer {
         }
     }
 }
+*/

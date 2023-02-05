@@ -6,7 +6,7 @@ use caldav_viewer::CaldavViewer;
 fn app() -> Html {
     html! {
         <div>
-            <CaldavViewer />
+            <CaldavViewer url="/public/cccamp23-public" />
         </div>
     }
 }
